@@ -23,8 +23,9 @@ export async function uploadCsv(file: File) {
   return res.json();
 }
 
-export async function startPipeline(runId: string) {
-  return fetchApi(`/pipeline/${runId}/start`, { method: "POST" });
+export async function startPipeline(runId: string, deepResearch: boolean = false) {
+  const qs = deepResearch ? "?deep_research=true" : "";
+  return fetchApi(`/pipeline/${runId}/start${qs}`, { method: "POST" });
 }
 
 export async function getPipelineStatus(runId: string) {
@@ -51,6 +52,10 @@ export async function getDashboardSummary(runId?: string) {
 
 export async function getCosts(runId: string) {
   return fetchApi(`/costs/${runId}`);
+}
+
+export function exportCsvUrl(): string {
+  return `${API_BASE}/export/csv`;
 }
 
 export const fetcher = (url: string) =>

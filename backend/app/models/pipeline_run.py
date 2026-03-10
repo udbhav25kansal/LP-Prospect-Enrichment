@@ -18,6 +18,7 @@ class PipelineRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     source_filename: Mapped[str | None] = mapped_column(String(255))
     config_snapshot: Mapped[dict | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
+    activity_log: Mapped[list | None] = mapped_column(JSON, default=list)
 
     contacts = relationship("Contact", back_populates="pipeline_run")
     enrichment_results = relationship("EnrichmentResult", back_populates="pipeline_run")

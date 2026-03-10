@@ -13,6 +13,7 @@ export default function ImportPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  const [deepResearch, setDeepResearch] = useState(false);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -35,7 +36,8 @@ export default function ImportPage() {
 
     try {
       const status = (await startPipeline(
-        ingestResult.run_id
+        ingestResult.run_id,
+        deepResearch
       )) as PipelineStatus;
       setPipelineStatus(status);
       setPolling(true);
@@ -146,12 +148,45 @@ export default function ImportPage() {
           </div>
 
           {!pipelineStatus && (
-            <button
-              onClick={handleStartPipeline}
-              className="mt-6 px-6 py-2.5 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700"
-            >
-              Start Enrichment & Scoring Pipeline
-            </button>
+            <div className="mt-6 space-y-4">
+              {/* Deep Research Toggle */}
+              <div className="flex items-start gap-3 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={deepResearch}
+                  onClick={() => setDeepResearch(!deepResearch)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    deepResearch ? "bg-indigo-600" : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      deepResearch ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold text-indigo-900">
+                    Enable Deep Research Mode
+                  </p>
+                  <p className="text-xs text-indigo-700 mt-0.5">
+                    Uses Gemini AI + Google Search for multi-source, cross-validated research.
+                    More thorough and accurate but slower (~2x) and costs more per org.
+                    Requires Gemini API key.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleStartPipeline}
+                className="px-6 py-2.5 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700"
+              >
+                {deepResearch
+                  ? "Start Deep Research Pipeline"
+                  : "Start Enrichment & Scoring Pipeline"}
+              </button>
+            </div>
           )}
         </div>
       )}

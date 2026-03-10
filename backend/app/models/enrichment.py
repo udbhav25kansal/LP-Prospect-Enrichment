@@ -31,6 +31,14 @@ class EnrichmentResult(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     claude_raw_response: Mapped[str | None] = mapped_column(Text)
     search_queries_used: Mapped[list | None] = mapped_column(JSON)
 
+    # Citation tracking
+    sources: Mapped[list | None] = mapped_column(JSON)  # [{index, title, url}, ...]
+    field_citations: Mapped[dict | None] = mapped_column(JSON)  # {field: [source_indices]}
+
+    # Deep research
+    gemini_raw_response: Mapped[dict | None] = mapped_column(JSON)
+    deep_research_enabled: Mapped[bool | None] = mapped_column(Boolean, default=False)
+
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")
     data_quality: Mapped[str | None] = mapped_column(String(10))
     error_message: Mapped[str | None] = mapped_column(Text)

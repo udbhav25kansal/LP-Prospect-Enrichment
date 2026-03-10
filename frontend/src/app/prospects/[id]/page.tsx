@@ -8,8 +8,46 @@ import { DIMENSION_LABELS, SEVERITY_CONFIG } from "@/lib/constants";
 import { formatCheckSize } from "@/lib/utils";
 import TierBadge from "@/components/shared/TierBadge";
 import ScoreBar from "@/components/shared/ScoreBar";
-import type { ProspectDetail } from "@/lib/types";
+import type { ProspectDetail, Enrichment, Source } from "@/lib/types";
 import { clsx } from "clsx";
+
+/** Small superscript citation badge that links to the source URL */
+function CitationBadge({ source }: { source: Source }) {
+  return (
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${source.title}\n${source.url}`}
+      className="inline-flex items-center justify-center w-4 h-4 ml-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-100 rounded hover:bg-emerald-200 transition-colors cursor-pointer align-super no-underline"
+    >
+      {source.index}
+    </a>
+  );
+}
+
+/** Render citation badges for a field */
+function Citations({
+  fieldName,
+  enrichment,
+}: {
+  fieldName: string;
+  enrichment: Enrichment;
+}) {
+  const indices = enrichment.field_citations?.[fieldName];
+  if (!indices || indices.length === 0 || !enrichment.sources) return null;
+
+  const sourceMap = new Map(enrichment.sources.map((s) => [s.index, s]));
+
+  return (
+    <span className="inline-flex gap-0.5 ml-1">
+      {indices.map((idx) => {
+        const source = sourceMap.get(idx);
+        return source ? <CitationBadge key={idx} source={source} /> : null;
+      })}
+    </span>
+  );
+}
 
 export default function ProspectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -52,11 +90,21 @@ export default function ProspectDetailPage() {
               Calibration Anchor
             </span>
           )}
+          {enrichment.deep_research_enabled && (
+            <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+              Deep Research
+            </span>
+          )}
         </div>
         <div className="flex gap-4 mt-1 text-sm text-gray-500">
           <span>{data.org_type}</span>
           {data.region && <span>{data.region}</span>}
-          {enrichment.aum_raw && <span>AUM: {enrichment.aum_raw}</span>}
+          {enrichment.aum_raw && (
+            <span>
+              AUM: {enrichment.aum_raw}
+              <Citations fieldName="aum" enrichment={enrichment} />
+            </span>
+          )}
         </div>
       </div>
 
@@ -163,6 +211,10 @@ export default function ProspectDetailPage() {
           <div>
             <p className="text-xs text-gray-500 font-medium">
               Investment Mandates
+              <Citations
+                fieldName="investment_mandates"
+                enrichment={enrichment}
+              />
             </p>
             <div className="flex flex-wrap gap-1 mt-1">
               {enrichment.investment_mandates?.length ? (
@@ -183,6 +235,10 @@ export default function ProspectDetailPage() {
           <div>
             <p className="text-xs text-gray-500 font-medium">
               Fund Allocations
+              <Citations
+                fieldName="fund_allocations"
+                enrichment={enrichment}
+              />
             </p>
             <div className="flex flex-wrap gap-1 mt-1">
               {enrichment.fund_allocations?.length ? (
@@ -203,6 +259,10 @@ export default function ProspectDetailPage() {
           <div>
             <p className="text-xs text-gray-500 font-medium">
               Sustainability Focus
+              <Citations
+                fieldName="sustainability_focus"
+                enrichment={enrichment}
+              />
             </p>
             <p className="text-sm text-gray-700 mt-1">
               {enrichment.sustainability_focus || "No evidence found"}
@@ -212,6 +272,10 @@ export default function ProspectDetailPage() {
           <div>
             <p className="text-xs text-gray-500 font-medium">
               Emerging Manager Evidence
+              <Citations
+                fieldName="emerging_manager_evidence"
+                enrichment={enrichment}
+              />
             </p>
             <p className="text-sm text-gray-700 mt-1">
               {enrichment.emerging_manager_evidence || "No evidence found"}
@@ -219,7 +283,13 @@ export default function ProspectDetailPage() {
           </div>
 
           <div className="md:col-span-2">
-            <p className="text-xs text-gray-500 font-medium">Key Findings</p>
+            <p className="text-xs text-gray-500 font-medium">
+              Key Findings
+              <Citations
+                fieldName="key_findings_summary"
+                enrichment={enrichment}
+              />
+            </p>
             <p className="text-sm text-gray-700 mt-1">
               {enrichment.key_findings_summary || "N/A"}
             </p>
@@ -230,6 +300,10 @@ export default function ProspectDetailPage() {
               <div className="md:col-span-2">
                 <p className="text-xs text-red-500 font-medium">
                   GP/Service Provider Signals
+                  <Citations
+                    fieldName="gp_service_provider_signals"
+                    enrichment={enrichment}
+                  />
                 </p>
                 <ul className="text-sm text-red-700 mt-1 list-disc list-inside">
                   {enrichment.gp_service_provider_signals.map((s, i) => (
@@ -240,7 +314,13 @@ export default function ProspectDetailPage() {
             )}
 
           <div>
-            <p className="text-xs text-gray-500 font-medium">LP Assessment</p>
+            <p className="text-xs text-gray-500 font-medium">
+              LP Assessment
+              <Citations
+                fieldName="is_capital_allocator"
+                enrichment={enrichment}
+              />
+            </p>
             <p className="text-sm text-gray-700 mt-1">
               {score.is_lp_not_gp === true
                 ? "Confirmed LP"
@@ -259,6 +339,37 @@ export default function ProspectDetailPage() {
             </p>
           </div>
         </div>
+
+        {/* Sources */}
+        {enrichment.sources && enrichment.sources.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              Sources ({enrichment.sources.length})
+            </h3>
+            <div className="space-y-1">
+              {enrichment.sources.map((s) => (
+                <div key={s.index} className="flex items-start gap-2 text-xs">
+                  <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded flex-shrink-0 mt-0.5">
+                    {s.index}
+                  </span>
+                  <div className="min-w-0">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-600 hover:underline font-medium truncate block"
+                    >
+                      {s.title || s.url}
+                    </a>
+                    <span className="text-gray-400 truncate block">
+                      {s.url}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Validation Flags */}

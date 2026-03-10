@@ -15,6 +15,12 @@ class ContactOut(OrmBase):
     relationship_depth: int
 
 
+class SourceOut(BaseModel):
+    index: int
+    title: str
+    url: str
+
+
 class EnrichmentOut(OrmBase):
     aum_raw: str | None
     aum_parsed: int | None
@@ -28,6 +34,9 @@ class EnrichmentOut(OrmBase):
     key_findings_summary: str | None
     data_quality: str | None
     enrichment_status: str
+    sources: list[SourceOut] | None = None
+    field_citations: dict[str, list[int]] | None = None
+    deep_research_enabled: bool | None = False
 
 
 class ScoreOut(OrmBase):
@@ -114,6 +123,13 @@ class DashboardSummary(BaseModel):
     top_prospects: list[ProspectSummary]
 
 
+class ActivityLogEntry(BaseModel):
+    timestamp: str
+    org: str
+    step: str
+    message: str
+
+
 class PipelineStatus(OrmBase):
     id: str
     status: str
@@ -123,6 +139,7 @@ class PipelineStatus(OrmBase):
     source_filename: str | None
     started_at: datetime | None
     completed_at: datetime | None
+    activity_log: list[ActivityLogEntry] = []
 
 
 class CostSummary(BaseModel):
@@ -130,6 +147,7 @@ class CostSummary(BaseModel):
     total_cost_usd: float
     tavily_cost_usd: float
     anthropic_cost_usd: float
+    gemini_cost_usd: float = 0.0
     total_api_calls: int
     avg_cost_per_org: float
     cost_by_operation: dict[str, float]

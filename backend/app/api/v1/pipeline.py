@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ async def start_pipeline(
     run_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    deep_research: bool = Query(False),
 ):
     """Start the enrichment + scoring pipeline for a run."""
     result = await db.execute(
@@ -28,11 +29,15 @@ async def start_pipeline(
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
 
-    if run.status not in ("pending", "failed"):
+    if run.status == "running":
         raise HTTPException(
             status_code=400,
-            detail=f"Pipeline is already {run.status}",
+            detail="Pipeline is currently running",
         )
+
+    # Store config with deep_research flag
+    run.config_snapshot = {"deep_research": deep_research}
+    await db.commit()
 
     # Launch pipeline in background
     background_tasks.add_task(pipeline_service.run_pipeline, run_id)

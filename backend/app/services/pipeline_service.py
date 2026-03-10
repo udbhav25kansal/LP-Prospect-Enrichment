@@ -11,6 +11,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.organization import Organization
 from app.models.contact import Contact
 from app.models.enrichment import EnrichmentResult
+from app.models.score import Score
 from app.models.pipeline_run import PipelineRun
 from app.services import enrichment_service, scoring_service, validation_service
 
@@ -34,6 +35,7 @@ async def get_relationship_depth_for_org(
 async def process_single_org(
     org: Organization,
     run_id: uuid.UUID,
+    deep_research: bool = False,
 ) -> dict:
     """Process a single organization: enrich → score → validate."""
     async with AsyncSessionLocal() as db:
@@ -60,11 +62,29 @@ async def process_single_org(
                     org_type=org.org_type,
                     region=org.region,
                     pipeline_run_id=run_id,
+                    deep_research=deep_research,
                 )
 
             if enrichment.enrichment_status != "completed":
                 await db.commit()
                 return {"org_name": org.name, "status": "enrichment_failed"}
+
+            # Check if already scored (for resume capability)
+            existing_score = await db.execute(
+                select(Score).where(
+                    Score.organization_id == org.id,
+                    Score.pipeline_run_id == run_id,
+                )
+            )
+            if existing_score.scalar_one_or_none():
+                logger.info(f"Skipping {org.name}: already scored in this run")
+                return {
+                    "org_name": org.name,
+                    "status": "completed",
+                    "composite": 0,
+                    "tier": "SKIPPED",
+                    "flags": 0,
+                }
 
             # Score
             score = await scoring_service.score_organization(
@@ -120,6 +140,10 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
             logger.error(f"Pipeline run {run_id} not found")
             return
 
+        # Read deep_research flag from config
+        config = run.config_snapshot or {}
+        deep_research = config.get("deep_research", False)
+
         # Update status
         run.status = "running"
         run.started_at = datetime.now(timezone.utc)
@@ -136,28 +160,28 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
         run.total_orgs = len(orgs)
         await db.commit()
 
-        logger.info(f"Pipeline {run_id}: processing {len(orgs)} organizations")
+        logger.info(
+            f"Pipeline {run_id}: processing {len(orgs)} organizations"
+            f"{' (deep research enabled)' if deep_research else ''}"
+        )
 
-    # Process in batches with bounded concurrency
-    batch_size = settings.batch_size
+    # Process with bounded concurrency — progress updates per-org
     concurrency = settings.enrichment_concurrency
     semaphore = asyncio.Semaphore(concurrency)
     processed = 0
     failed = 0
+    _progress_lock = asyncio.Lock()
 
     async def process_with_semaphore(org):
+        nonlocal processed, failed
         async with semaphore:
-            return await process_single_org(org, run_id)
+            result = await process_single_org(org, run_id, deep_research=deep_research)
 
-    for i in range(0, len(orgs), batch_size):
-        batch = orgs[i : i + batch_size]
-        tasks = [process_with_semaphore(org) for org in batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for result in results:
+        # Update counters and persist progress after each org
+        async with _progress_lock:
             if isinstance(result, Exception):
                 failed += 1
-                logger.error(f"Batch task exception: {result}")
+                logger.error(f"Task exception for {org.name}: {result}")
             elif isinstance(result, dict):
                 if result.get("status") == "completed":
                     processed += 1
@@ -166,19 +190,25 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
             else:
                 failed += 1
 
-        # Update progress
-        async with AsyncSessionLocal() as db:
-            await db.execute(
-                update(PipelineRun)
-                .where(PipelineRun.id == run_id)
-                .values(processed_orgs=processed, failed_orgs=failed)
-            )
-            await db.commit()
+            # Persist progress to DB so frontend polling sees live updates
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(PipelineRun)
+                    .where(PipelineRun.id == run_id)
+                    .values(processed_orgs=processed, failed_orgs=failed)
+                )
+                await db.commit()
 
-        logger.info(
-            f"Pipeline {run_id}: batch {i // batch_size + 1} complete — "
-            f"processed={processed}, failed={failed}"
-        )
+            logger.info(
+                f"Pipeline {run_id}: {processed + failed}/{len(orgs)} done — "
+                f"processed={processed}, failed={failed}"
+            )
+
+        return result
+
+    # Launch all orgs at once — semaphore controls concurrency
+    tasks = [process_with_semaphore(org) for org in orgs]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     # Finalize
     async with AsyncSessionLocal() as db:

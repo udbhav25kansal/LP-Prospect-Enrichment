@@ -12,12 +12,15 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
 
     # AI Model Config
-    claude_model: str = "claude-sonnet-4-20250514"
+    claude_model: str = "claude-sonnet-4-6"
     claude_max_tokens: int = 4096
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.1-pro-preview"
 
     # Rate Limiting
     tavily_requests_per_minute: int = 50
     claude_requests_per_minute: int = 30
+    gemini_requests_per_minute: int = 15
 
     # Pipeline Config
     enrichment_concurrency: int = 5

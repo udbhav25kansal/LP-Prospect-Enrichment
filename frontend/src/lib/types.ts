@@ -39,6 +39,12 @@ export interface Contact {
   relationship_depth: number;
 }
 
+export interface Source {
+  index: number;
+  title: string;
+  url: string;
+}
+
 export interface Enrichment {
   aum_raw: string | null;
   aum_parsed: number | null;
@@ -52,6 +58,9 @@ export interface Enrichment {
   key_findings_summary: string | null;
   data_quality: string | null;
   enrichment_status: string;
+  sources: Source[] | null;
+  field_citations: Record<string, number[]> | null;
+  deep_research_enabled: boolean | null;
 }
 
 export interface Score {

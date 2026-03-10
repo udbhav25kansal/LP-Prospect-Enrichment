@@ -60,6 +60,7 @@ async def get_run_cost_summary(db: AsyncSession, run_id: uuid.UUID) -> dict:
         "total_cost_usd": round(total_cost, 4),
         "tavily_cost_usd": round(provider_costs.get("tavily", 0), 4),
         "anthropic_cost_usd": round(provider_costs.get("anthropic", 0), 4),
+        "gemini_cost_usd": round(provider_costs.get("google", 0), 4),
         "total_api_calls": total_calls,
         "avg_cost_per_org": round(avg_cost_per_org, 4),
         "cost_by_operation": {k: round(v, 4) for k, v in operation_costs.items()},

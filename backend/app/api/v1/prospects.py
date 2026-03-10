@@ -19,6 +19,7 @@ from app.schemas.common import (
     ContactOut,
     EnrichmentOut,
     ScoreOut,
+    SourceOut,
     ValidationFlagOut,
 )
 
@@ -270,6 +271,12 @@ async def get_prospect_detail(
             key_findings_summary=enrichment.key_findings_summary if enrichment else None,
             data_quality=enrichment.data_quality if enrichment else None,
             enrichment_status=enrichment.enrichment_status if enrichment else "unknown",
+            sources=[
+                SourceOut(index=s["index"], title=s["title"], url=s["url"])
+                for s in (enrichment.sources or [])
+            ] if enrichment else None,
+            field_citations=enrichment.field_citations if enrichment else None,
+            deep_research_enabled=enrichment.deep_research_enabled if enrichment else False,
         ),
         contacts=[
             ContactOut(

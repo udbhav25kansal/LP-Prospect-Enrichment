@@ -3,7 +3,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { fetcher } from "@/lib/api";
+import { fetcher, exportCsvUrl } from "@/lib/api";
 import { ORG_TYPES } from "@/lib/constants";
 import TierBadge from "@/components/shared/TierBadge";
 import type { ProspectListResponse } from "@/lib/types";
@@ -62,7 +62,16 @@ export default function ProspectsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-gray-900">Prospect Pipeline</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Prospect Pipeline</h1>
+        <a
+          href={exportCsvUrl()}
+          download
+          className="px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors"
+        >
+          Export CSV
+        </a>
+      </div>
 
       {/* Filters */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">

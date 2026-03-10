@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+class ActivityLog:
+    """Thread-safe activity log that persists to DB on each update."""
+
+    def __init__(self, run_id: uuid.UUID):
+        self.run_id = run_id
+        self.entries: list[dict] = []
+        self._lock = asyncio.Lock()
+
+    async def add(self, org: str, step: str, message: str):
+        async with self._lock:
+            self.entries.append({
+                "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                "org": org,
+                "step": step,
+                "message": message,
+            })
+            # Persist to DB
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(PipelineRun)
+                    .where(PipelineRun.id == self.run_id)
+                    .values(activity_log=list(self.entries))
+                )
+                await db.commit()
+
+
 async def get_relationship_depth_for_org(
     db: AsyncSession, org_id: uuid.UUID, run_id: uuid.UUID
 ) -> int:
@@ -36,8 +62,11 @@ async def process_single_org(
     org: Organization,
     run_id: uuid.UUID,
     deep_research: bool = False,
+    activity_log: ActivityLog | None = None,
 ) -> dict:
     """Process a single organization: enrich → score → validate."""
+    org_short = org.name[:40]
+
     async with AsyncSessionLocal() as db:
         try:
             # Get relationship depth
@@ -54,6 +83,9 @@ async def process_single_org(
             enrichment = existing.scalar_one_or_none()
 
             if not enrichment:
+                if activity_log:
+                    await activity_log.add(org_short, "enrich_start", "Starting enrichment...")
+
                 # Enrich
                 enrichment = await enrichment_service.enrich_organization(
                     db=db,
@@ -63,9 +95,12 @@ async def process_single_org(
                     region=org.region,
                     pipeline_run_id=run_id,
                     deep_research=deep_research,
+                    activity_log=activity_log,
                 )
 
             if enrichment.enrichment_status != "completed":
+                if activity_log:
+                    await activity_log.add(org_short, "error", "Enrichment failed")
                 await db.commit()
                 return {"org_name": org.name, "status": "enrichment_failed"}
 
@@ -87,6 +122,9 @@ async def process_single_org(
                 }
 
             # Score
+            if activity_log:
+                await activity_log.add(org_short, "scoring", "Claude scoring & calibration...")
+
             score = await scoring_service.score_organization(
                 db=db,
                 org_id=org.id,
@@ -99,6 +137,9 @@ async def process_single_org(
             )
 
             # Validate
+            if activity_log:
+                await activity_log.add(org_short, "validating", "Running validation checks...")
+
             flags = await validation_service.validate_scores(
                 db=db,
                 org=org,
@@ -108,6 +149,12 @@ async def process_single_org(
             )
 
             await db.commit()
+
+            if activity_log:
+                await activity_log.add(
+                    org_short, "done",
+                    f"Score: {score.composite_score} — {score.tier}"
+                )
 
             logger.info(
                 f"Processed {org.name}: composite={score.composite_score}, "
@@ -124,12 +171,16 @@ async def process_single_org(
 
         except Exception as e:
             logger.error(f"Failed to process {org.name}: {e}")
+            if activity_log:
+                await activity_log.add(org_short, "error", f"Failed: {str(e)[:80]}")
             await db.rollback()
             return {"org_name": org.name, "status": "failed", "error": str(e)}
 
 
 async def run_pipeline(run_id: uuid.UUID) -> None:
     """Run the full enrichment + scoring pipeline for a pipeline run."""
+    activity_log = ActivityLog(run_id)
+
     async with AsyncSessionLocal() as db:
         # Get the run
         result = await db.execute(
@@ -147,6 +198,7 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
         # Update status
         run.status = "running"
         run.started_at = datetime.now(timezone.utc)
+        run.activity_log = []
         await db.commit()
 
         # Get all orgs for this run
@@ -165,6 +217,12 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
             f"{' (deep research enabled)' if deep_research else ''}"
         )
 
+    await activity_log.add(
+        "Pipeline", "start",
+        f"Processing {len(orgs)} organizations"
+        f"{' with Deep Research' if deep_research else ''}"
+    )
+
     # Process with bounded concurrency — progress updates per-org
     concurrency = settings.enrichment_concurrency
     semaphore = asyncio.Semaphore(concurrency)
@@ -175,7 +233,9 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
     async def process_with_semaphore(org):
         nonlocal processed, failed
         async with semaphore:
-            result = await process_single_org(org, run_id, deep_research=deep_research)
+            result = await process_single_org(
+                org, run_id, deep_research=deep_research, activity_log=activity_log
+            )
 
         # Update counters and persist progress after each org
         async with _progress_lock:
@@ -209,6 +269,11 @@ async def run_pipeline(run_id: uuid.UUID) -> None:
     # Launch all orgs at once — semaphore controls concurrency
     tasks = [process_with_semaphore(org) for org in orgs]
     await asyncio.gather(*tasks, return_exceptions=True)
+
+    await activity_log.add(
+        "Pipeline", "complete",
+        f"Done — {processed} processed, {failed} failed"
+    )
 
     # Finalize
     async with AsyncSessionLocal() as db:

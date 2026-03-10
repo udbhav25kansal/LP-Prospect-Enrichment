@@ -27,6 +27,7 @@ async def enrich_organization(
     region: str | None,
     pipeline_run_id: uuid.UUID,
     deep_research: bool = False,
+    activity_log=None,
 ) -> EnrichmentResult:
     """Enrich a single organization.
 
@@ -43,14 +44,18 @@ async def enrich_organization(
         deep_research_enabled=deep_research,
     )
 
+    org_short = org_name[:40]
+
     try:
         if deep_research:
             await _enrich_deep_research(
-                db, enrichment, org_id, org_name, org_type, region, pipeline_run_id
+                db, enrichment, org_id, org_name, org_type, region, pipeline_run_id,
+                activity_log=activity_log,
             )
         else:
             await _enrich_standard(
-                db, enrichment, org_id, org_name, org_type, region, pipeline_run_id
+                db, enrichment, org_id, org_name, org_type, region, pipeline_run_id,
+                activity_log=activity_log,
             )
 
         enrichment.enrichment_status = "completed"
@@ -74,24 +79,39 @@ async def _enrich_standard(
     org_type: str,
     region: str | None,
     pipeline_run_id: str,
+    activity_log=None,
 ) -> None:
     """Standard mode: Tavily general search → Claude extraction."""
+    org_short = org_name[:40]
 
     # Step 1: Tavily web search (general investment queries)
+    if activity_log:
+        await activity_log.add(org_short, "tavily", "Tavily searching investment profile, ESG, emerging managers...")
+
     search_results = await tavily_client.search_organization(org_name, org_type)
 
     enrichment.search_queries_used = search_results["queries_used"]
     enrichment.tavily_raw_results = search_results["results"]
 
+    total_results = sum(len(r.get("results", [])) for r in search_results["results"].values())
+    if activity_log:
+        await activity_log.add(org_short, "tavily_done", f"Tavily found {total_results} results ({search_results['search_credits']} searches)")
+
     _log_tavily_cost(db, pipeline_run_id, org_id, search_results)
 
     # Step 2: Claude extraction with citations
+    if activity_log:
+        await activity_log.add(org_short, "claude_extract", "Claude extracting structured data...")
+
     await _run_claude_extraction(
         db, enrichment, org_name, org_type, region, pipeline_run_id, org_id,
         tavily_results=search_results["results"],
         deep_research_text=None,
         deep_research_sources=None,
     )
+
+    if activity_log:
+        await activity_log.add(org_short, "claude_extract_done", f"Extraction complete — data quality: {enrichment.data_quality}")
 
 
 async def _enrich_deep_research(
@@ -102,17 +122,13 @@ async def _enrich_deep_research(
     org_type: str,
     region: str | None,
     pipeline_run_id: str,
+    activity_log=None,
 ) -> None:
-    """Deep research: Gemini (primary) + Tavily (complementary) in parallel → Claude extraction.
-
-    Gemini: Deep investment research via Google Search grounding
-            (AUM, mandates, allocations, ESG, emerging manager)
-    Tavily: Complementary intelligence that Google can't access well
-            (LinkedIn profiles, SEC filings, press releases, niche industry pubs)
-    """
+    """Deep research: Gemini (primary) + Tavily (complementary) in parallel → Claude extraction."""
     from app.ai import gemini_client
 
-    # Build a brief context hint for Gemini based on what we know from the CRM
+    org_short = org_name[:40]
+
     context_hint = (
         f"We are researching {org_name}, classified as a '{org_type}' in our CRM"
         f"{f', based in {region}' if region else ''}. "
@@ -121,7 +137,11 @@ async def _enrich_deep_research(
         f"sustainability/ESG focus, and any emerging manager programs."
     )
 
-    # Run Gemini and Tavily in PARALLEL — they search for different things
+    if activity_log:
+        await activity_log.add(org_short, "gemini", "Gemini researching via Google Search...")
+        await activity_log.add(org_short, "tavily", "Tavily searching LinkedIn, SEC, press, niche...")
+
+    # Run Gemini and Tavily in PARALLEL
     gemini_task = asyncio.create_task(
         _run_gemini_research(org_name, org_type, context_hint)
     )
@@ -129,7 +149,6 @@ async def _enrich_deep_research(
         tavily_client.search_complementary_intelligence(org_name, org_type)
     )
 
-    # Wait for both to complete
     gemini_response, tavily_complementary = await asyncio.gather(
         gemini_task, tavily_task, return_exceptions=True
     )
@@ -140,12 +159,13 @@ async def _enrich_deep_research(
 
     if isinstance(gemini_response, Exception):
         logger.warning(f"Gemini deep research failed for {org_name}: {gemini_response}")
+        if activity_log:
+            await activity_log.add(org_short, "gemini_warn", "Gemini research failed — continuing with Tavily only")
     else:
         deep_research_text = gemini_response.get("research_text", "")
         deep_research_sources = gemini_response.get("grounding_sources", [])
         enrichment.gemini_raw_response = gemini_response
 
-        # Log Gemini costs
         gemini_cost_log = APICostLog(
             id=str(uuid.uuid4()),
             pipeline_run_id=pipeline_run_id,
@@ -158,6 +178,12 @@ async def _enrich_deep_research(
             latency_ms=gemini_response.get("latency_ms", 0),
         )
         db.add(gemini_cost_log)
+
+        if activity_log:
+            await activity_log.add(
+                org_short, "gemini_done",
+                f"Gemini found {len(deep_research_sources)} grounding sources"
+            )
         logger.info(
             f"Gemini deep research for {org_name}: "
             f"{len(deep_research_sources)} grounding sources"
@@ -167,25 +193,39 @@ async def _enrich_deep_research(
     tavily_results = {}
     if isinstance(tavily_complementary, Exception):
         logger.warning(f"Tavily complementary search failed for {org_name}: {tavily_complementary}")
+        if activity_log:
+            await activity_log.add(org_short, "tavily_warn", "Tavily complementary search failed")
     else:
         tavily_results = tavily_complementary["results"]
         enrichment.search_queries_used = tavily_complementary["queries_used"]
         enrichment.tavily_raw_results = tavily_results
 
         _log_tavily_cost(db, pipeline_run_id, org_id, tavily_complementary)
+
+        if activity_log:
+            await activity_log.add(
+                org_short, "tavily_done",
+                f"Tavily found results from {tavily_complementary['search_credits']} searches"
+            )
         logger.info(
             f"Tavily complementary for {org_name}: "
             f"{tavily_complementary['search_credits']} searches "
             f"(LinkedIn, SEC, press, niche)"
         )
 
-    # Step 2: Claude extraction — receives BOTH Gemini research AND Tavily complementary
+    # Claude extraction — receives BOTH Gemini research AND Tavily complementary
+    if activity_log:
+        await activity_log.add(org_short, "claude_extract", "Claude extracting structured data from all sources...")
+
     await _run_claude_extraction(
         db, enrichment, org_name, org_type, region, pipeline_run_id, org_id,
         tavily_results=tavily_results,
         deep_research_text=deep_research_text,
         deep_research_sources=deep_research_sources,
     )
+
+    if activity_log:
+        await activity_log.add(org_short, "claude_extract_done", f"Extraction complete — data quality: {enrichment.data_quality}")
 
 
 async def _run_gemini_research(

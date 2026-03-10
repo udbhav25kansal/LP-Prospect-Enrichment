@@ -51,6 +51,7 @@ async def start_pipeline(
         source_filename=run.source_filename,
         started_at=run.started_at,
         completed_at=run.completed_at,
+        activity_log=run.activity_log or [],
     )
 
 
@@ -76,6 +77,7 @@ async def get_pipeline_status(
         source_filename=run.source_filename,
         started_at=run.started_at,
         completed_at=run.completed_at,
+        activity_log=run.activity_log or [],
     )
 
 

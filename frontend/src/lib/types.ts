@@ -115,6 +115,13 @@ export interface DashboardSummary {
   top_prospects: ProspectSummary[];
 }
 
+export interface ActivityLogEntry {
+  timestamp: string;
+  org: string;
+  step: string;
+  message: string;
+}
+
 export interface PipelineStatus {
   id: string;
   status: string;
@@ -124,6 +131,7 @@ export interface PipelineStatus {
   source_filename: string | null;
   started_at: string | null;
   completed_at: string | null;
+  activity_log: ActivityLogEntry[];
 }
 
 export interface CostSummary {

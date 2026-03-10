@@ -1,8 +1,40 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { uploadCsv, startPipeline, getPipelineStatus } from "@/lib/api";
-import type { IngestResponse, PipelineStatus } from "@/lib/types";
+import type { IngestResponse, PipelineStatus, ActivityLogEntry } from "@/lib/types";
+
+const STEP_ICONS: Record<string, string> = {
+  start: "\u25B6",
+  enrich_start: "\u{1F50D}",
+  tavily: "\u{1F310}",
+  tavily_done: "\u2705",
+  tavily_warn: "\u26A0\uFE0F",
+  gemini: "\u2728",
+  gemini_done: "\u2705",
+  gemini_warn: "\u26A0\uFE0F",
+  claude_extract: "\u{1F9E0}",
+  claude_extract_done: "\u2705",
+  scoring: "\u{1F4CA}",
+  validating: "\u{1F6E1}\uFE0F",
+  done: "\u{1F389}",
+  error: "\u274C",
+  complete: "\u{1F3C1}",
+};
+
+const STEP_COLORS: Record<string, string> = {
+  tavily: "text-blue-600",
+  tavily_done: "text-blue-600",
+  gemini: "text-purple-600",
+  gemini_done: "text-purple-600",
+  claude_extract: "text-amber-600",
+  claude_extract_done: "text-amber-600",
+  scoring: "text-indigo-600",
+  validating: "text-gray-600",
+  done: "text-emerald-600",
+  error: "text-red-600",
+  complete: "text-emerald-700",
+};
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -14,6 +46,7 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -62,10 +95,15 @@ export default function ImportPage() {
       } catch (e) {
         // ignore polling errors
       }
-    }, 3000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [polling, ingestResult]);
+
+  // Auto-scroll activity log
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [pipelineStatus?.activity_log?.length]);
 
   const progressPct =
     pipelineStatus && pipelineStatus.total_orgs > 0
@@ -75,6 +113,8 @@ export default function ImportPage() {
             100
         )
       : 0;
+
+  const activityLog = pipelineStatus?.activity_log || [];
 
   return (
     <div className="space-y-6">
@@ -240,6 +280,34 @@ export default function ImportPage() {
                 </p>
               </div>
             </div>
+
+            {/* Activity Feed */}
+            {activityLog.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Live Activity
+                </h3>
+                <div className="bg-gray-900 rounded-lg p-4 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed">
+                  {activityLog.map((entry: ActivityLogEntry, i: number) => (
+                    <div key={i} className="flex gap-2 py-0.5">
+                      <span className="text-gray-500 flex-shrink-0">
+                        {entry.timestamp}
+                      </span>
+                      <span className="flex-shrink-0">
+                        {STEP_ICONS[entry.step] || "\u25CF"}
+                      </span>
+                      <span className="text-gray-400 flex-shrink-0 min-w-0 max-w-[180px] truncate">
+                        {entry.org}
+                      </span>
+                      <span className={STEP_COLORS[entry.step] || "text-gray-300"}>
+                        {entry.message}
+                      </span>
+                    </div>
+                  ))}
+                  <div ref={logEndRef} />
+                </div>
+              </div>
+            )}
 
             {pipelineStatus.status === "completed" && (
               <div className="text-center pt-4">
